@@ -1,0 +1,445 @@
+Library	Best For	Difficulty	Would I Use It?
+scikit-learn	Classical ML (Random Forest, XGBoost wrappers, Logistic Regression)	Easy	Yes, as a baseline
+PyTorch	Deep learning, neural networks, transformers	Medium	Absolutely
+TensorFlow	Deep learning	Medium	Good, but I'd choose PyTorch
+XGBoost	Structured/tabular medical data	Easy	Definitely
+LightGBM	Very large tabular datasets	Easy	Excellent
+CatBoost	Categorical features	Easy	Very good
+PyTorch Lightning	Organizing deep learning projects	Medium	Yes, eventually
+What hospitals actually use
+
+Most hospital prediction models aren't giant language models.
+
+Instead they're often:
+
+Gradient-boosted decision trees (XGBoost/LightGBM)
+Recurrent neural networks (LSTMs)
+Temporal Convolutional Networks
+Transformers designed for time-series clinical data
+
+The important part is handling time, because patients change over hours rather than existing as a single snapshot.
+
+For your project
+
+Your data might look like this:
+
+Time 0
+HR = 112
+BP = 97/61
+Lactate = 2.4
+
+↓
+
+15 minutes later
+
+HR = 118
+BP = 92/58
+Lactate = 2.8
+
+↓
+
+30 minutes later
+
+HR = 126
+BP = 86/52
+Lactate = 3.5
+
+A standard Random Forest in scikit-learn only sees one row at a time unless you manually engineer trend features.
+
+A neural network in PyTorch can learn from the sequence directly.
+
+Libraries I'd install
+
+I'd probably build your environment like this:
+
+pip install torch
+pip install torchvision
+pip install pandas
+pip install numpy
+pip install matplotlib
+pip install scikit-learn
+pip install xgboost
+pip install lightgbm
+pip install optuna
+pip install shap
+pip install tqdm
+pip install pyarrow
+pip install polars
+What I would actually train
+Version 1 (baseline)
+
+Use XGBoost.
+
+Input:
+
+Age
+Sex
+Heart Rate
+Blood Pressure
+Respiratory Rate
+SpO2
+Temperature
+Lactate
+Creatinine
+Glucose
+White Blood Cell Count
+etc.
+
+Predict
+
+ICU admission
+Sepsis
+Mortality
+Mechanical ventilation
+Vasopressor need
+
+This will probably outperform many simple neural networks on structured clinical data.
+
+Version 2
+
+Move to PyTorch.
+
+Instead of one patient snapshot:
+
+Patient
+
+Time 0
+
+↓
+
+Time 1
+
+↓
+
+Time 2
+
+↓
+
+Time 3
+
+↓
+
+Time 4
+
+Now the model learns deterioration over time.
+
+This is much closer to your original vision.
+
+Version 3
+
+Eventually build a clinical transformer.
+
+Instead of processing
+
+Patient Snapshot
+
+you process
+
+Entire Clinical Timeline
+
+This is similar to the direction of recent research models like Med-BERT, BEHRT, and other transformer-based electronic health record models, though your MVP doesn't need that level of complexity.
+
+If I were building this from scratch today
+
+My stack would be:
+
+Data: pandas → later polars
+Visualization: matplotlib
+Baseline ML: scikit-learn
+Primary prediction model: XGBoost
+Deep learning: PyTorch
+Hyperparameter tuning: Optuna
+Explainability: SHAP
+
+That combination gives you a strong progression:
+
+Build and validate a competitive baseline with XGBoost.
+Demonstrate value quickly on ICU/ED data.
+Add PyTorch sequence models that continuously update patient risk over time, aligning with your clinical trajectory concept.
+
+For the project you've described over the past several conversations, I would center the MVP on XGBoost for the first working model and then transition to PyTorch once you've built the full data pipeline and can leverage sequential patient data. That approach is both technically sound and much closer to how state-of-the-art clinical prediction systems are developed.
+
+What is Med-BERT?
+
+Med-BERT is one of the first transformer models designed specifically for electronic health records (EHRs) instead of natural language.
+
+The key insight was:
+
+A patient's medical history can be treated like a sentence.
+
+Instead of words:
+
+The
+patient
+developed
+sepsis
+
+it sees medical events:
+
+Hypertension
+
+↓
+
+Chest pain
+
+↓
+
+Troponin elevated
+
+↓
+
+Coronary angiography
+
+↓
+
+PCI
+
+↓
+
+Discharge
+
+Every diagnosis, medication, lab, and procedure becomes a "token."
+
+Why BERT works
+
+In natural language,
+
+The dog chased the ball.
+
+BERT learns that
+
+dog
+
+is related to
+
+ball
+
+because of surrounding context.
+
+Med-BERT does the same thing.
+
+Diabetes
+
+↓
+
+Elevated glucose
+
+↓
+
+Metformin
+
+↓
+
+HbA1c
+
+The model learns these relationships without being explicitly programmed.
+
+How Med-BERT is trained
+
+The first stage is self-supervised pretraining.
+
+Imagine hiding part of a patient's record:
+
+Hypertension
+
+Diabetes
+
+[MASK]
+
+Lisinopril
+
+The model predicts
+
+ACE inhibitor
+
+or
+
+High blood pressure
+
+depending on how the data are tokenized.
+
+This is similar to how language models learn missing words.
+
+Why this matters
+
+Instead of manually telling the model
+
+high lactate is bad
+low blood pressure is bad
+rising creatinine is bad
+
+the transformer learns those patterns directly from millions of patient records.
+
+That is incredibly powerful.
+
+The limitation of Med-BERT
+
+Here's the important part.
+
+Med-BERT mostly learns what happened.
+
+Patient:
+
+Diabetes
+
+↓
+
+Sepsis
+
+↓
+
+ICU
+
+↓
+
+Discharge
+
+Your project is about learning how the patient is changing over time.
+
+That is harder.
+
+Your project is closer to a Clinical Transformer
+
+Imagine a patient arriving in the ED.
+
+0 min
+
+Heart Rate 96
+
+BP 112/72
+
+RR 18
+
+Lactate 1.6
+
+Then
+
+15 min
+
+HR 105
+
+BP 105/68
+
+RR 22
+
+Then
+
+30 min
+
+HR 118
+
+BP 98/60
+
+RR 25
+
+Then
+
+45 min
+
+HR 130
+
+BP 88/54
+
+RR 32
+
+A transformer can process this entire sequence.
+
+Instead of asking
+
+Is this patient sick?
+
+it asks
+
+Where is this patient's trajectory heading?
+
+That's a much richer prediction.
+
+This is where research is going
+
+Recent clinical transformer models have evolved beyond Med-BERT to capture richer temporal information, including models such as:
+
+BEHRT
+CEHR-BERT
+G-BERT
+MedGPT
+
+Many newer systems combine diagnoses, medications, laboratory values, procedures, and timestamps rather than treating diagnoses alone as the input.
+
+What I would build if I had no constraints
+
+I'd call it something like:
+
+Clinical Trajectory Transformer (CTT)
+
+Input:
+
+Time
+
+Vitals
+
+Labs
+
+Medications
+
+Imaging
+
+Nursing Notes
+
+Ventilator Settings
+
+Procedures
+
+Demographics
+
+Medical History
+
+Continuous Monitoring
+
+The model would maintain a continuously updated internal representation of the patient's state.
+
+Every new lab
+
+↓
+
+updates the patient's representation.
+
+Every medication
+
+↓
+
+updates the patient's representation.
+
+Every vital sign
+
+↓
+
+updates the patient's representation.
+
+Instead of recalculating everything from scratch every hour, the model incrementally refines its understanding as new information arrives.
+
+Then add multimodal data
+
+Once the structured data pipeline is working, you could add:
+
+Chest X-rays
+CT scans
+ECG waveforms
+Ultrasound images
+Physician notes
+Nursing notes
+Lab trends
+Continuous bedside monitor streams
+
+Eventually, a single model could fuse all of those inputs into one evolving patient representation. That's an active area of research and much more complex, but it's a logical long-term direction.
+
+If I were mentoring this project
+
+I'd aim for a progression like this:
+
+MVP: Train an XGBoost model on structured ICU data (for example, from publicly available datasets) to predict deterioration or ICU outcomes.
+Sequence model: Build a PyTorch model (LSTM or transformer) that learns from time-series vital signs and laboratory values instead of isolated snapshots.
+Clinical trajectory model: Create a transformer that updates risk predictions as new clinical events arrive over time.
+Multimodal expansion: Incorporate clinical notes and, later, imaging or waveform data.
+Research-grade system: Explore self-supervised pretraining on large EHR datasets and fine-tune for tasks like sepsis prediction, mortality, ICU transfer, or treatment-response forecasting.
+
+That final stage is approaching the level of current academic and industry research. It's ambitious, but it's also closely aligned with the vision you've described for your Better Minds project: not simply predicting a single outcome, but continuously modeling a patient's evolving clinical state.

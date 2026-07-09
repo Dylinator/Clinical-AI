@@ -1,0 +1,13 @@
+config.py          # horizon N, gap, grid interval, alert threshold, feature list, seed
+schema.py          # Patient / Observation / Intervention dataclasses; column names
+patient_generator.py
+timeline_engine.py # resampling only
+labeling.py        # forward-looking labels (horizon / gap / criteria)
+features.py        # featurize(history, t) -> vector   (pure, past-only, shared)
+splits.py          # patient-level train/test split
+baselines.py       # NEWS2 / qSOFA
+model.py           # Pipeline(preproc + estimator); fit / predict / persist
+evaluate.py        # AUPRC, calibration, Brier, lead time, false-alarms/day
+trajectory_engine.py
+dashboard.py       # presentation only
+tests/             # leakage + labeling tests
