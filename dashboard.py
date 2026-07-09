@@ -9,7 +9,7 @@ so the screen shows exactly what the model produced.
 Run it (after `python run_pipeline.py` has written the artifacts/ folder):
 
     pip install streamlit
-    streamlit run dashboard.py
+    streamlit run dashboard.py.
 """
 
 from __future__ import annotations
