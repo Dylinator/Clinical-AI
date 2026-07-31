@@ -35,7 +35,9 @@ def _grid() -> np.ndarray:
 def _clip(name: str, value: float) -> float:
     lo, hi = {
         "hr": (30, 220), "rr": (4, 60), "sbp": (40, 260),
-        "o2": (70, 100), "temp": (33.0, 42.0), "lactate": (0.2, 20.0),
+        "o2": (70, 100), "temp": (33.0, 42.0),
+        "lactate": (0.2, 20.0), "creatinine": (0.2, 15.0),
+        "wbc": (0.5, 60.0), "platelets": (10.0, 700.0),
     }[name]
     return float(np.clip(value, lo, hi))
 
@@ -46,11 +48,11 @@ def _concern_score(row: dict, gen: "config.GenConfig") -> int:
     lactate. Unmeasured (None) vitals can't be reacted to."""
     score = 0
     temp, hr, sbp = row.get("temp"), row.get("hr"), row.get("sbp")
-    if temp is not None and temp >= gen.lactate_concern_temp:
+    if temp is not None and temp >= gen.concern_temp:
         score += 1
-    if hr is not None and hr >= gen.lactate_concern_hr:
+    if hr is not None and hr >= gen.concern_hr:
         score += 1
-    if sbp is not None and sbp <= gen.lactate_concern_sbp:
+    if sbp is not None and sbp <= gen.concern_sbp:
         score += 1
     return score
 
@@ -132,7 +134,9 @@ def generate(gen: config.GenConfig = config.GEN, seed: int = config.SEED) -> lis
         # Deterioration begins subtly `prodrome_min` before the overt onset. That
         # early trend is the signal a trend-based model can catch and a single-
         # timepoint score cannot ("early deterioration is visible in trends").
+        # Labs LEAD — their derangement starts even earlier (lab_prodrome_min).
         prod_start = (onset - gen.prodrome_min) if septic else None
+        lab_prod_start = (onset - gen.lab_prodrome_min) if septic else None
 
         # Some controls transiently look bad (red herrings -> false-alarm pressure).
         herring = (not septic) and (rng.random() < gen.red_herring_rate)
@@ -142,10 +146,14 @@ def generate(gen: config.GenConfig = config.GEN, seed: int = config.SEED) -> lis
         obs_list: list[Observation] = []
         for t in times:
             row = {}
-            effect_t = max(0.0, t - prod_start) if septic else 0.0
+            # Vitals use the standard prodrome; labs LEAD with an earlier one, so
+            # lab trends carry the earliest pre-onset signal the model can catch.
+            vital_effect_t = max(0.0, t - prod_start) if septic else 0.0
+            lab_effect_t = max(0.0, t - lab_prod_start) if septic else 0.0
             for v in gen.baseline:
                 val = base[v]
                 if septic:
+                    effect_t = lab_effect_t if v in config.LABS else vital_effect_t
                     val = val + drift[v] * effect_t
                 if herring:
                     bump = np.exp(-((t - h_center) ** 2) / (2 * h_width ** 2))
@@ -164,24 +172,28 @@ def generate(gen: config.GenConfig = config.GEN, seed: int = config.SEED) -> lis
                 val += rng.normal(0, gen.meas_noise[v])   # measurement noise
                 row[v] = _clip(v, val)
 
-            # Monitoring gaps: any reading may be missing; lower SES -> more gaps.
-            for vit in gen.baseline:
-                if vit != "lactate" and rng.random() < miss_p:
+            # Monitoring gaps: any VITAL reading may be missing; lower SES -> more
+            # gaps. Labs are handled separately below (they are ordered, not
+            # continuously monitored).
+            for vit in config.VITALS:
+                if rng.random() < miss_p:
                     row[vit] = None
 
-            # Lactate: a slow baseline schedule PLUS a reactive draw when the
+            # Labs: a slow per-lab routine schedule PLUS a reactive draw when the
             # OBSERVED vitals look concerning — the doctor sees fever/tachycardia/
-            # hypotension and orders one. Keyed to what's observable, not the hidden
-            # onset, so it fires during the symptomatic prodrome (and sometimes on a
-            # red-herring control). SES under-monitoring still thins draws.
-            drawn = (t % gen.lactate_every_min == 0)
+            # hypotension and orders labs. Keyed to what's observable, not the
+            # hidden onset, so draws fire during the symptomatic prodrome (and
+            # sometimes on a red-herring control). SES under-monitoring thins them.
+            # A missing lab is therefore itself informative (see config / Sec. 6).
             concern = _concern_score(row, gen)
-            if concern > 0:
-                drawn = drawn or (rng.random() < gen.lactate_order_prob[concern])
-            if drawn and rng.random() < miss_p:
-                drawn = False
-            if not drawn:
-                row["lactate"] = None   # missing -> informative (see config)
+            for lab in config.LABS:
+                drawn = (t % gen.lab_every_min[lab] == 0)
+                if concern > 0:
+                    drawn = drawn or (rng.random() < gen.lab_order_prob[concern])
+                if drawn and rng.random() < miss_p:
+                    drawn = False
+                if not drawn:
+                    row[lab] = None   # missing -> informative (see config)
 
             obs_list.append(Observation(time=float(t), **row))
 

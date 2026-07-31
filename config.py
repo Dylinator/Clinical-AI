@@ -6,14 +6,19 @@ into any other file, it belongs here instead. Everything downstream imports from
 this module, so an experiment is a one-line change here, not a hunt across files.
 
 Units are fixed and documented once, here, so the generator and a future
-real-data loader can't quietly disagree (see schema.py):
-    time     : minutes since ED arrival (t=0)
-    hr       : beats/min
-    rr       : breaths/min
-    sbp      : systolic blood pressure, mmHg   (NOT mean arterial pressure)
-    o2       : SpO2, %
-    temp     : degrees Celsius                 (NOT Fahrenheit — NEWS2 needs C)
-    lactate  : mmol/L
+real-data loader can't quietly disagree (see schema.py). These units match the
+PhysioNet/CinC-2019 real-data adapter (ingest/physionet2019.py) so synthetic and
+real patients are interchangeable downstream:
+    time       : minutes since ED arrival (t=0)
+    hr         : beats/min
+    rr         : breaths/min
+    sbp        : systolic blood pressure, mmHg   (NOT mean arterial pressure)
+    o2         : SpO2, %
+    temp       : degrees Celsius                 (NOT Fahrenheit — NEWS2 needs C)
+    lactate    : mmol/L
+    creatinine : mg/dL                           (kidney; SOFA renal component)
+    wbc        : 10^3 cells/uL                   (infection; leukocytosis in sepsis)
+    platelets  : 10^3 cells/uL                   (coagulation; SOFA drops in sepsis)
 """
 
 from dataclasses import dataclass, field
@@ -41,7 +46,13 @@ TARGET_ALERTS_PER_DAY = 1.0
 # --------------------------------------------------------------------------- #
 # The canonical feature vector (built only in features.py — Rule 1)
 # --------------------------------------------------------------------------- #
-VITALS = ["hr", "rr", "sbp", "o2", "temp", "lactate"]
+# Vitals are DENSE (bedside monitor); labs are SPARSE (a clinician orders them),
+# so labs additionally carry a `_missing` indicator — whether a lab was drawn is
+# itself signal (informative missingness, Section 6). Both kinds flow through the
+# identical feature path; CHANNELS is the union the feature builder iterates.
+VITALS = ["hr", "rr", "sbp", "o2", "temp"]
+LABS = ["lactate", "creatinine", "wbc", "platelets"]   # lactate + SOFA-core
+CHANNELS = VITALS + LABS
 
 SLOPE_WINDOW_MIN = 60       # rolling-slope lookback
 
@@ -70,23 +81,26 @@ MED_FEATURES = ["on_vasopressor", "on_antibiotics", "recent_fluid", "on_antipyre
 
 # Order matters: this is the exact column order the model trains on and the
 # trajectory engine scores on. Keep it in one place so the two can't drift.
-_VITAL_FEATURES = (
-    [f"{v}_now" for v in VITALS]          # last observed value at time t
-    + [f"{v}_delta" for v in VITALS]      # change since the previous observation
-    + [f"{v}_slope" for v in VITALS]      # slope over the last SLOPE_WINDOW_MIN
-    + ["lactate_missing"]                 # informative-missingness indicator
+_SIGNAL_FEATURES = (
+    [f"{c}_now" for c in CHANNELS]        # last observed value at time t
+    + [f"{c}_delta" for c in CHANNELS]    # change since the previous observation
+    + [f"{c}_slope" for c in CHANNELS]    # slope over the last SLOPE_WINDOW_MIN
+    + [f"{lab}_missing" for lab in LABS]  # informative-missingness, one per lab
 )
 
 FEATURES = (
-    _VITAL_FEATURES
+    _SIGNAL_FEATURES
     + (STATIC_FEATURES if USE_STATIC_FEATURES else [])
     + (SES_FEATURES if USE_SES_AS_FEATURE else [])
     + (MED_FEATURES if USE_MED_FEATURES else [])
 )
 
-# Fallback values used only when a vital has never been observed yet (start of a
-# stay). Carry-forward handles everything after the first observation.
-BASELINE_FILL = {"hr": 80, "rr": 16, "sbp": 120, "o2": 98, "temp": 36.8, "lactate": 1.2}
+# Fallback values used only when a channel has never been observed yet (start of
+# a stay). Carry-forward handles everything after the first observation.
+BASELINE_FILL = {
+    "hr": 80, "rr": 16, "sbp": 120, "o2": 98, "temp": 36.8,
+    "lactate": 1.2, "creatinine": 1.0, "wbc": 8.0, "platelets": 250.0,
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -106,47 +120,65 @@ class GenConfig:
     # low-SES), averaging ~8% across this risk-skewed cohort.
     sepsis_rate: float = 0.06
 
-    # Healthy baseline (mean, sd) for each vital.
+    # Healthy baseline (mean, sd) for each channel (vitals + labs).
     baseline: dict = field(default_factory=lambda: {
         "hr":   (80, 8),
         "rr":   (16, 2),
         "sbp":  (120, 10),
         "o2":   (98, 1.0),
         "temp": (36.8, 0.3),
-        "lactate": (1.2, 0.3),
+        "lactate":    (1.2, 0.3),      # mmol/L
+        "creatinine": (1.0, 0.2),      # mg/dL  (normal 0.6–1.2)
+        "wbc":        (8.0, 2.0),      # 10^3/uL (normal ~4–11)
+        "platelets":  (250.0, 50.0),   # 10^3/uL (normal ~150–400)
     })
 
     # Per-minute drift AFTER deterioration onset (mean, sd across patients).
     # Heterogeneous: some patients crash fast, some slow (Rule: overlap/realism).
+    # Labs move in their clinically correct direction during sepsis: creatinine
+    # rises (AKI), WBC rises (leukocytosis), platelets fall (thrombocytopenia).
     drift_per_min: dict = field(default_factory=lambda: {
         "hr":   (+0.09, 0.03),
         "rr":   (+0.020, 0.008),
         "sbp":  (-0.07, 0.03),
         "o2":   (-0.014, 0.005),
         "temp": (+0.006, 0.002),
-        "lactate": (+0.015, 0.005),
+        "lactate":    (+0.015, 0.005),
+        "creatinine": (+0.0045, 0.0018),
+        "wbc":        (+0.030, 0.012),
+        "platelets":  (-0.42, 0.16),
     })
 
     # Deterioration ramps up over this many minutes BEFORE the labelled onset
     # (a prodrome). This is what puts subtle, catchable signal into the pre-onset
     # prediction window — real early-warning depends on the trend, not the level.
     prodrome_min: int = 180
+    # Labs LEAD: metabolic/organ derangement begins before the vitals visibly
+    # move, so labs start drifting earlier. This is what makes the model lean on
+    # lab trends for the *earliest* pre-onset signal — a stronger lab signal that
+    # is still leakage-safe (the label is the forward-looking onset, never a lab
+    # value; features stay past-only). Set == prodrome_min to disable the lead.
+    lab_prodrome_min: int = 300
     onset_range_min: tuple = (180, 420)   # overt-onset window
     meas_noise: dict = field(default_factory=lambda: {
-        "hr": 3.0, "rr": 1.0, "sbp": 4.0, "o2": 0.7, "temp": 0.15, "lactate": 0.15,
+        "hr": 3.0, "rr": 1.0, "sbp": 4.0, "o2": 0.7, "temp": 0.15,
+        "lactate": 0.15, "creatinine": 0.05, "wbc": 0.5, "platelets": 10.0,
     })
 
-    # Lactate is a lab, so it is sparse and irregular. Beyond a slow baseline
-    # schedule, a clinician REACTIVELY orders one when the OBSERVED vitals look
-    # concerning (fever / tachycardia / hypotension) — not on the hidden onset. So
-    # the presence of a lactate is itself a signal the patient looked sick then
-    # (informative missingness — see Section 6 of the notes).
-    lactate_every_min: int = 120
-    lactate_concern_temp: float = 37.5   # degC — fever
-    lactate_concern_hr: float = 95.0     # bpm — tachycardia
-    lactate_concern_sbp: float = 110.0   # mmHg — hypotension (order if BELOW)
-    # P(a lactate is ordered this step) by number of concerning signs seen (0..3):
-    lactate_order_prob: tuple = (0.0, 0.30, 0.65, 0.90)
+    # Labs are sparse and irregular. Beyond a slow routine schedule (per lab),
+    # a clinician REACTIVELY orders labs when the OBSERVED vitals look concerning
+    # (fever / tachycardia / hypotension) — not on the hidden onset. So the
+    # PRESENCE of a lab is itself a signal the patient looked sick then
+    # (informative missingness — see Section 6 of the notes). Lactate is drawn
+    # most often; the CBC/CMP panel (creatinine/wbc/platelets) slightly less.
+    lab_every_min: dict = field(default_factory=lambda: {
+        "lactate": 120, "creatinine": 180, "wbc": 180, "platelets": 180,
+    })
+    concern_temp: float = 37.5   # degC — fever
+    concern_hr: float = 95.0     # bpm — tachycardia
+    concern_sbp: float = 110.0   # mmHg — hypotension (order if BELOW)
+    # P(a lab is ordered reactively this step) by number of concerning signs (0..3):
+    lab_order_prob: tuple = (0.0, 0.30, 0.65, 0.90)
 
     # A fraction of controls transiently look bad (red herrings) so the classes
     # are not linearly separable.

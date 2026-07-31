@@ -15,14 +15,24 @@ from typing import Optional
 
 @dataclass
 class Observation:
-    """One timestamped set of vitals. Any vital may be None (not yet measured)."""
+    """One timestamped set of vitals + labs. Any channel may be None (not yet
+    measured). Vitals are dense (bedside monitor); labs are sparse and irregular
+    (a clinician has to order them) — the missingness itself is signal."""
     time: float                 # minutes since ED arrival
+    # Vitals (dense, monitored)
     hr: Optional[float] = None
     rr: Optional[float] = None
     sbp: Optional[float] = None
     o2: Optional[float] = None
     temp: Optional[float] = None
+    # Labs (sparse, ordered) — lactate + SOFA-core (creatinine=kidney,
+    # wbc=infection, platelets=coagulation). Same shape as vitals so they flow
+    # through the identical schema + feature path; distinguished only by being
+    # sparse and carrying a missing-indicator (see config.LABS).
     lactate: Optional[float] = None
+    creatinine: Optional[float] = None
+    wbc: Optional[float] = None
+    platelets: Optional[float] = None
 
 
 @dataclass

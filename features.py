@@ -5,11 +5,12 @@ features.py — the ONE feature builder (Rule 1, the most important rule).
 and live scoring (trajectory_engine) both call it, so the model can never be fed
 one thing at fit time and a different thing at predict time (train/serve skew).
 
-Feature vector (order fixed in config.FEATURES):
-    <vital>_now    : last observed value, carried forward (BASELINE_FILL if never seen)
-    <vital>_delta  : change since the previous observation
-    <vital>_slope  : slope over the last SLOPE_WINDOW_MIN minutes, per minute
-    lactate_missing: 1 if lactate is unmeasured at t (informative missingness)
+Feature vector (order fixed in config.FEATURES), over every CHANNEL (vitals + labs):
+    <channel>_now  : last observed value, carried forward (BASELINE_FILL if never seen)
+    <channel>_delta: change since the previous observation
+    <channel>_slope: slope over the last SLOPE_WINDOW_MIN minutes, per minute
+    <lab>_missing  : 1 if that lab is unmeasured at t (informative missingness),
+                     one flag per lab in config.LABS
 
 Imputation policy lives here and nowhere else (see the notes, Data model):
 carry-forward the last observation, fall back to a baseline only before the first
@@ -29,7 +30,7 @@ def featurize_history(hist: pd.DataFrame) -> dict:
     times = hist["time"].to_numpy(dtype=float)
     feats: dict[str, float] = {}
 
-    for v in config.VITALS:
+    for v in config.CHANNELS:                     # vitals + labs, same treatment
         col = hist[v].to_numpy(dtype=float)
         seen = ~np.isnan(col)
         obs_t, obs_v = times[seen], col[seen]
@@ -47,7 +48,10 @@ def featurize_history(hist: pd.DataFrame) -> dict:
         feats[f"{v}_delta"] = float(delta)
         feats[f"{v}_slope"] = float(slope)
 
-    feats["lactate_missing"] = float(np.isnan(hist["lactate"].to_numpy(dtype=float)[-1]))
+    # One informative-missingness indicator per lab (labs are ordered, not
+    # continuously monitored — whether a lab exists at t is itself signal).
+    for lab in config.LABS:
+        feats[f"{lab}_missing"] = float(np.isnan(hist[lab].to_numpy(dtype=float)[-1]))
 
     # Static / demographic / history features — constant per patient, so they
     # can't leak; included only when config turns them on.
@@ -65,7 +69,10 @@ def featurize_history(hist: pd.DataFrame) -> dict:
 
 
 def featurize_at(patient_df: pd.DataFrame, t: float) -> dict:
-    """Slice a patient's frame to rows <= t, then featurize. Past-only by design."""
+    """Slice a patient's frame to rows <= t, then featurize. Past-only by design.
+    (The training hot loop in build_training_matrix does this slice by binary
+    search; this stays the simple, obviously-correct form for the trajectory
+    engine and the leakage test, which are not performance-critical.)"""
     return featurize_history(patient_df[patient_df["time"] <= t])
 
 
@@ -76,11 +83,20 @@ def build_training_matrix(full_df: pd.DataFrame, labeled_df: pd.DataFrame):
 
     Returns (X, y, meta) with X columns in config.FEATURES order.
     """
-    by_patient = {pid: g.sort_values("time") for pid, g in full_df.groupby("patient_id")}
+    # Cache each patient's sorted frame AND its time array once, so the per-row
+    # loop below slices by binary search instead of re-masking the whole frame at
+    # every t (the O(N^2) constant factor the config comment flags). The feature
+    # computation still goes through the ONE shared featurize_history (Rule 1).
+    by_patient = {}
+    for pid, g in full_df.groupby("patient_id"):
+        g = g.sort_values("time")
+        by_patient[pid] = (g, g["time"].to_numpy())
 
     feat_rows = []
     for r in labeled_df.itertuples(index=False):
-        feat_rows.append(featurize_at(by_patient[r.patient_id], r.time))
+        g, times = by_patient[r.patient_id]
+        cut = int(np.searchsorted(times, r.time, side="right"))
+        feat_rows.append(featurize_history(g.iloc[:cut]))
 
     X = pd.DataFrame(feat_rows).reindex(columns=config.FEATURES)
     y = labeled_df["label"].reset_index(drop=True)

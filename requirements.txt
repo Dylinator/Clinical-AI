@@ -1,5 +1,8 @@
+# Core pipeline — the synthetic MVP, RandomForest baseline, evaluation, dashboard.
+# Pinned loosely; the pipeline is not version-sensitive.
 numpy
 pandas
 scikit-learn
 joblib
+altair        # dashboard charts (Streamlit's Altair backend)
 streamlit

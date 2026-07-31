@@ -23,7 +23,11 @@ def _patient_frame():
         "sbp":  [120, 116, 110, 104, 98],
         "o2":   [98, 98, 97, 96, 95],
         "temp": [36.8, 36.9, 37.1, 37.4, 37.8],
-        "lactate": [1.2, np.nan, 2.1, np.nan, 3.4],
+        # labs — sparse (NaN where not drawn), same as real ordering
+        "lactate":    [1.2, np.nan, 2.1, np.nan, 3.4],
+        "creatinine": [1.0, np.nan, np.nan, 1.3, np.nan],
+        "wbc":        [8.0, np.nan, np.nan, 12.0, np.nan],
+        "platelets":  [250.0, np.nan, np.nan, 180.0, np.nan],
         # static attributes are constant per patient
         "age": 72.0, "sex": 1,
         "comorbidity_count": 3, "prior_complications": 1, "ses": 4,
@@ -39,7 +43,7 @@ def test_future_rows_do_not_change_features():
 
     tampered = df.copy()
     future = tampered["time"] > t
-    for v in config.VITALS:                 # blow up every future value
+    for v in config.CHANNELS:               # blow up every future vital AND lab
         tampered.loc[future, v] = 999.0
     after = featurize_at(tampered, t)
 

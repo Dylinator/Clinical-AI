@@ -36,8 +36,12 @@ def to_frame(patients: list[Patient]) -> pd.DataFrame:
             row = {
                 "patient_id": p.id,
                 "time": o.time,
-                "hr": o.hr, "rr": o.rr, "sbp": o.sbp,
-                "o2": o.o2, "temp": o.temp, "lactate": o.lactate,
+                # vitals
+                "hr": o.hr, "rr": o.rr, "sbp": o.sbp, "o2": o.o2, "temp": o.temp,
+                # labs (lactate + SOFA-core)
+                "lactate": o.lactate, "creatinine": o.creatinine,
+                "wbc": o.wbc, "platelets": o.platelets,
+                # static
                 "age": p.age, "sex": p.sex,
                 "comorbidity_count": p.comorbidity_count,
                 "prior_complications": p.prior_complications,
@@ -45,7 +49,7 @@ def to_frame(patients: list[Patient]) -> pd.DataFrame:
             }
             row.update(_med_flags(p.interventions, o.time))
             rows.append(row)
-    cols = ["patient_id", "time"] + config.VITALS + config.STATIC_ALL + config.MED_FEATURES
+    cols = ["patient_id", "time"] + config.CHANNELS + config.STATIC_ALL + config.MED_FEATURES
     df = pd.DataFrame(rows, columns=cols)
     return df.sort_values(["patient_id", "time"]).reset_index(drop=True)
 

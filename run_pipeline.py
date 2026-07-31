@@ -11,6 +11,14 @@ risk trajectory. Everything is seeded, so re-running gives identical numbers.
 from __future__ import annotations
 import json
 import os
+import sys
+
+# The report below uses a few non-ASCII characters (→, ≈, ~). On Windows the
+# default console encoding is often cp1252, which crashes on them; force UTF-8.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 import numpy as np
 
@@ -119,7 +127,7 @@ def main():
         mark = "   <- BP is drug-supported (pressor)" if on_vaso.get(r.time) else ""
         print(f"  t={r.time:3.0f}  risk={r.risk:5.1%}  {'#' * int(r.risk * 40)}{mark}")
 
-    print(f"\nartifacts written to {config.ARTIFACT_DIR}/  →  streamlit run dashboard.py")
+    print(f"\nartifacts written to {config.ARTIFACT_DIR}/  →  python -m streamlit run dashboard.py")
 
 
 if __name__ == "__main__":

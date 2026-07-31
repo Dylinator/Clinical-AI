@@ -1,0 +1,8 @@
+# Optional extras — the encoder-only transformer (model_transformer.py, benchmark.py)
+# and the real-data path. Install on top of requirements.txt:
+#     pip install -r requirements.txt -r requirements-extra.txt
+#
+# torch is CPU-only here; the model is tiny and trains on CPU in under a minute.
+torch
+# xgboost is the notes' suggested one-line upgrade from RandomForest in model.py.
+xgboost

@@ -36,6 +36,35 @@ def top_drivers(est, k: int = 3):
     return model_mod.global_importances(est)[:k]
 
 
+def trajectory_transformer(patient_df: pd.DataFrame, tmodel) -> pd.DataFrame:
+    """Risk-over-time from the encoder-only transformer. Same shape as
+    `trajectory` (RF), but scores the SEQUENCE up to each t — so the dashboard can
+    overlay the two models on one patient. Past-only by the same slice (time <= t).
+    """
+    import numpy as np
+    import sequences as seqmod
+    import model_transformer as mt
+
+    pdf = patient_df.sort_values("time")
+    times_all = pdf["time"].to_numpy()
+    seqs, tvecs, stats = [], [], []
+    for t in times_all:
+        hist = pdf[pdf["time"] <= t]
+        if len(hist) > mt.MAX_LEN:
+            hist = hist.iloc[-mt.MAX_LEN:]
+        s, tm = seqmod._one_sequence(hist)
+        seqs.append(s)
+        tvecs.append(tm)
+        stats.append(seqmod._static_vector(hist))
+    stat = (np.vstack(stats) if stats else np.zeros((0, seqmod.N_STATIC))).astype("float32")
+    risk = mt.predict_risk(tmodel, seqs, tvecs, stat)
+    return pd.DataFrame({
+        "patient_id": pdf["patient_id"].to_numpy(),
+        "time": times_all,
+        "risk": risk,
+    })
+
+
 if __name__ == "__main__":
     from synthetic import generate
     from timeline_engine import to_frame
