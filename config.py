@@ -21,6 +21,7 @@ real patients are interchangeable downstream:
     platelets  : 10^3 cells/uL                   (coagulation; SOFA drops in sepsis)
 """
 
+import os
 from dataclasses import dataclass, field
 
 
@@ -223,7 +224,9 @@ GEN = GenConfig()
 # --------------------------------------------------------------------------- #
 # Paths
 # --------------------------------------------------------------------------- #
-ARTIFACT_DIR = "artifacts"
+# Anchor artifacts to THIS file's directory so paths resolve no matter where a
+# script or `streamlit run` is launched from (not the current working directory).
+ARTIFACT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 PIPELINE_PATH = f"{ARTIFACT_DIR}/pipeline.joblib"
 DATASET_PATH = f"{ARTIFACT_DIR}/dataset.csv"   # CSV keeps deps minimal; swap to
 #                                                .parquet if you install pyarrow
