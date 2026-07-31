@@ -61,8 +61,10 @@ def main():
     news2, qsofa = baselines.score_matrix(X[te])
 
     print(f"{'model':<18}{'AUPRC':>8}{'AUROC':>8}{'Brier':>8}")
+    eval_metrics = {}
     for name, prob in [("our model", risk_te), ("NEWS2", news2), ("qSOFA", qsofa)]:
         m = evaluate.metrics(y[te], prob)
+        eval_metrics[name] = m
         brier = f"{m['Brier']:.3f}" if "Brier" in m else "   -"
         print(f"{name:<18}{m['AUPRC']:>8.3f}{m['AUROC']:>8.3f}{brier:>8}")
     print(f"(test positive rate = {y[te].mean():.1%} — AUPRC floor for a coin flip)\n")
@@ -91,6 +93,29 @@ def main():
     print(f"  ({m_op['n_cases']} cases / {m_op['n_controls']} controls in test)")
     json.dump({"threshold": m_op["threshold"]},
               open(f"{config.ARTIFACT_DIR}/threshold.json", "w"))
+
+    # Give the dashboard's benchmark tab (Tab 2) a manifest, so a fresh deploy — which
+    # ships no artifacts/ — still populates it. Written ONLY if absent, so a richer
+    # `benchmark.py` run (which also adds the transformer row) is never clobbered.
+    bench_path = f"{config.ARTIFACT_DIR}/benchmark.json"
+    if not os.path.exists(bench_path):
+        label = {"our model": "RandomForest", "NEWS2": "NEWS2", "qSOFA": "qSOFA"}
+        bench_metrics = {}
+        for name in ("our model", "NEWS2", "qSOFA"):
+            mm, op = eval_metrics[name], ops[name]
+            bench_metrics[label[name]] = {
+                "AUPRC": mm.get("AUPRC"), "AUROC": mm.get("AUROC"),
+                "Brier": mm.get("Brier"), "sensitivity": op["sensitivity"],
+                "lead_min": op["mean_lead_time_min"],
+                "false_alarms_per_day": op["false_alarms_per_day"],
+                "threshold": op["threshold"],
+            }
+        json.dump({
+            "source": "synthetic", "holdout": None, "limit": len(patients),
+            "grid_interval_min": getattr(config, "GRID_INTERVAL_MIN", 10),
+            "max_hours": None, "n_patients": len(patients),
+            "test_positive_rate": float(y[te].mean()), "metrics": bench_metrics,
+        }, open(bench_path, "w"), indent=2)
     print()
 
     # 6. Fairness audit across SES strata (Section 10) -----------------------

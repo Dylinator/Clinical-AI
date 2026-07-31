@@ -41,10 +41,28 @@ st.set_page_config(page_title="Clinical Trajectory — RF vs Transformer", layou
 ART = config.ARTIFACT_DIR
 
 
+def _bootstrap_if_missing():
+    """A fresh deploy clones the repo WITHOUT the git-ignored artifacts/ folder, so
+    there is no trained model and the app would error with 'No trained model found'.
+    Build the synthetic artifacts once, in-process -- seeded, so they are identical to
+    a local `python run_pipeline.py`. A no-op once the model exists; because it runs
+    inside the cached loader it executes at most once per deployed container."""
+    if os.path.exists(config.PIPELINE_PATH):
+        return
+    os.makedirs(config.ARTIFACT_DIR, exist_ok=True)
+    # Modest cohort so a cold-start deploy trains fast, while keeping enough positive
+    # cases for stable metrics; also matches the committed local artifacts (same seed).
+    config.GEN.n_patients = 700
+    with st.spinner("First launch: training the model (runs once, ~1-3 min)..."):
+        import run_pipeline
+        run_pipeline.main()
+
+
 @st.cache_resource
 def load_everything():
     """Reconstruct the exact cohort the models were trained on (from the manifest)
     and load both models + threshold + held-out ids. Cached for the session."""
+    _bootstrap_if_missing()
     manifest = None
     mpath = f"{ART}/benchmark.json"
     if os.path.exists(mpath):
